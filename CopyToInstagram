@@ -1,0 +1,98 @@
+// Redirect to Instagram if not on the site
+if (window.location.origin !== "https://www.instagram.com") {
+  window.alert(
+    "Hey! You need to be on Instagram's site before running this script. I will redirect you there, but please re-run the script in the console once you arrive."
+  );
+  window.location.href = "https://www.instagram.com";
+  console.clear();
+}
+
+// Configuration for fetching data
+const apiFetchOptions = {
+  credentials: "include",
+  headers: {
+    "X-IG-App-ID": "936619743392459",
+  },
+  method: "GET",
+};
+
+// Utility functions
+const pause = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const getRandomIntInRange = (min, max) => Math.floor(Math.random() * (max - min)) + min;
+
+// Recursive function to handle pagination and collect all data
+const fetchPaginatedFriendships = async (listType, userId, count, nextMaxId = "") => {
+  let url = `https://www.instagram.com/api/v1/friendships/${userId}/${listType}/?count=${count}`;
+  if (nextMaxId) {
+    url += `&max_id=${nextMaxId}`;
+  }
+
+  const response = await fetch(url, apiFetchOptions);
+  const data = await response.json();
+
+  if (data.next_max_id) {
+    const sleepDuration = getRandomIntInRange(800, 1500);
+    console.log(`Loaded ${data.users.length} ${listType}. Sleeping for ${sleepDuration}ms to avoid rate limiting.`);
+    
+    await pause(sleepDuration);
+
+    const nextPageData = await fetchPaginatedFriendships(listType, userId, count, data.next_max_id);
+    return data.users.concat(nextPageData);
+  }
+
+  return data.users;
+};
+
+// Functions to get followers and following lists
+const fetchFollowers = (userId, count = 50, nextMaxId = "") => 
+  fetchPaginatedFriendships("followers", userId, count, nextMaxId);
+
+const fetchFollowing = (userId, count = 50, nextMaxId = "") => 
+  fetchPaginatedFriendships("following", userId, count, nextMaxId);
+
+// Function to retrieve user ID based on username
+const fetchUserIdByUsername = async (username) => {
+  const query = username.toLowerCase();
+  const url = `https://www.instagram.com/api/v1/web/search/topsearch/?context=blended&query=${query}&include_reel=false`;
+  
+  const response = await fetch(url, apiFetchOptions);
+  const data = await response.json();
+
+  const user = data.users?.find(user => user.user.username.toLowerCase() === query);
+  return user?.user?.pk || null;
+};
+
+// Function to gather and compare friendship stats
+const fetchUserFriendshipStats = async (username) => {
+  const userId = await fetchUserIdByUsername(username);
+
+  if (!userId) {
+    throw new Error(`User with username ${username} not found.`);
+  }
+
+  const [followers, following] = await Promise.all([
+    fetchFollowers(userId),
+    fetchFollowing(userId)
+  ]);
+
+  const followersUsernames = new Set(followers.map(follower => follower.username.toLowerCase()));
+  const followingUsernames = new Set(following.map(followed => followed.username.toLowerCase()));
+
+  console.log('-'.repeat(28));
+  console.log(`Fetched ${followersUsernames.size} followers and ${followingUsernames.size} following.`);
+  console.log('If this doesn’t seem right, some of the output might be inaccurate.');
+
+  const notFollowingBack = Array.from(followersUsernames).filter(username => !followingUsernames.has(username));
+  const notFollowedBack = Array.from(followingUsernames).filter(username => !followersUsernames.has(username));
+
+  return {
+    notFollowingBack,
+    notFollowedBack
+  };
+};
+
+// Replace "example_username" with the actual Instagram username
+const targetUsername = "example_username";
+
+// Fetch and log friendship stats
+fetchUserFriendshipStats(targetUsername).then(console.log);
